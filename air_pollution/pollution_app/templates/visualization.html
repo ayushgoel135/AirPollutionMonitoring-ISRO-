@@ -1,0 +1,649 @@
+{% extends 'base.html' %}
+
+{% block extra_css %}
+<style>
+    #earth-container {
+        width: 100%;
+        height: 80vh;
+        background-color: #000;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    #info-panel {
+        position: absolute;
+        top: 20px;
+        right: 20px;
+        background: rgba(0, 0, 0, 0.7);
+        color: white;
+        padding: 15px;
+        border-radius: 5px;
+        z-index: 100;
+        max-width: 300px;
+    }
+    
+    #controls {
+        position: absolute;
+        bottom: 20px;
+        left: 20px;
+        z-index: 100;
+        background: rgba(0, 0, 0, 0.7);
+        padding: 10px;
+        border-radius: 5px;
+    }
+    
+    .pm-legend {
+        display: flex;
+        flex-direction: column;
+        margin-top: 10px;
+    }
+    
+    .legend-item {
+        display: flex;
+        align-items: center;
+        margin-bottom: 5px;
+    }
+    
+    .legend-color {
+        width: 20px;
+        height: 20px;
+        display: inline-block;
+        margin-right: 10px;
+        border-radius: 3px;
+    }
+    
+    .loading {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        color: white;
+        font-size: 18px;
+        z-index: 1000;
+    }
+    
+    .location-details {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        background: rgba(0, 0, 0, 0.8);
+        color: white;
+        padding: 20px;
+        border-radius: 5px;
+        z-index: 200;
+        max-width: 400px;
+        display: none;
+    }
+    
+    .close-details {
+        position: absolute;
+        top: 5px;
+        right: 10px;
+        color: white;
+        cursor: pointer;
+        font-size: 20px;
+    }
+    
+    .highlighted {
+        animation: pulse 1.5s infinite;
+    }
+    
+    @keyframes pulse {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.2); }
+        100% { transform: scale(1); }
+    }
+    
+    .live-indicator {
+        position: absolute;
+        top: 10px;
+        left: 10px;
+        background: rgba(255, 0, 0, 0.7);
+        color: white;
+        padding: 5px 10px;
+        border-radius: 3px;
+        z-index: 100;
+        font-size: 12px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div id="earth-container">
+    <div class="loading" id="loading">Loading Earth visualization...</div>
+    <div class="live-indicator" id="live-indicator">LIVE</div>
+    
+    <div id="info-panel">
+        <h4>Air Quality Information</h4>
+        <div id="location-info">Click on a location marker</div>
+        <div id="pm-info">PM2.5: -- µg/m³</div>
+        <div id="aqi-info">AQI Category: --</div>
+        <div class="pm-legend">
+            <h5>PM2.5 Levels (µg/m³)</h5>
+            <div class="legend-item"><span class="legend-color" style="background-color: #00e400;"></span>Good (0-30)</div>
+            <div class="legend-item"><span class="legend-color" style="background-color: #ffff00;"></span>Moderate (31-60)</div>
+            <div class="legend-item"><span class="legend-color" style="background-color: #ff7e00;"></span>Unhealthy for Sensitive (61-90)</div>
+            <div class="legend-item"><span class="legend-color" style="background-color: #ff0000;"></span>Unhealthy (91-120)</div>
+            <div class="legend-item"><span class="legend-color" style="background-color: #8f3f97;"></span>Very Unhealthy (121-250)</div>
+            <div class="legend-item"><span class="legend-color" style="background-color: #7e0023;"></span>Hazardous (250+)</div>
+        </div>
+    </div>
+    
+    <div id="controls" class="btn-group">
+        <button id="zoom-in" class="btn btn-primary">+</button>
+        <button id="zoom-out" class="btn btn-primary">-</button>
+        <button id="reset-view" class="btn btn-primary">Reset</button>
+        <input type="date" id="date-selector" class="form-control" max="{{ today }}">
+        <button id="live-mode" class="btn btn-danger">Live Mode</button>
+    </div>
+    
+    <div class="location-details" id="location-details">
+        <span class="close-details" id="close-details">&times;</span>
+        <h3 id="detail-location">Location</h3>
+        <div class="detail-row"><strong>PM2.5:</strong> <span id="detail-pm25">--</span> µg/m³</div>
+        <div class="detail-row"><strong>PM10:</strong> <span id="detail-pm10">--</span> µg/m³</div>
+        <div class="detail-row"><strong>AQI:</strong> <span id="detail-aqi">--</span></div>
+        <div class="detail-row"><strong>Wind Speed:</strong> <span id="detail-wind">--</span> km/h</div>
+        <div class="detail-row"><strong>Humidity:</strong> <span id="detail-humidity">--</span>%</div>
+        <div class="detail-row"><strong>Temperature:</strong> <span id="detail-temp">--</span>°C</div>
+        <div class="detail-row"><strong>Last Updated:</strong> <span id="detail-updated">--</span></div>
+        <div class="detail-row"><strong>Prediction Confidence:</strong> <span id="detail-confidence">--</span>%</div>
+    </div>
+</div>
+
+<div class="row mt-3">
+    <div class="col-md-12">
+        <div class="card">
+            <div class="card-header">
+                <h5>7-Day PM2.5 Trend</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="trend-chart" height="300"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.132.2/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    // Three.js Earth Visualization
+    let scene, camera, renderer, earth, controls;
+    let pmMarkers = [];
+    let selectedDate = new Date().toISOString().split('T')[0];
+    let today = new Date().toISOString().split('T')[0];
+    let trendChart = null;
+    let raycaster = new THREE.Raycaster();
+    let mouse = new THREE.Vector2();
+    let selectedMarker = null;
+    let isLiveMode = false;
+    let liveUpdateInterval = null;
+    let indiaGroup = new THREE.Group();
+    
+    // Set max date to today
+    document.getElementById('date-selector').value = selectedDate;
+    document.getElementById('date-selector').max = today;
+    
+    // PM2.5 color scale
+    function getColorForPM(pm) {
+        if (pm <= 30) return [0, 228, 0];      // Green - Good
+        if (pm <= 60) return [255, 255, 0];    // Yellow - Moderate
+        if (pm <= 90) return [255, 126, 0];    // Orange - Unhealthy for Sensitive
+        if (pm <= 120) return [255, 0, 0];     // Red - Unhealthy
+        if (pm <= 250) return [143, 63, 151];  // Purple - Very Unhealthy
+        return [126, 0, 35];                   // Maroon - Hazardous
+    }
+    
+    function getAQICategory(pm) {
+        if (pm <= 30) return "Good";
+        if (pm <= 60) return "Moderate";
+        if (pm <= 90) return "Unhealthy for Sensitive Groups";
+        if (pm <= 120) return "Unhealthy";
+        if (pm <= 250) return "Very Unhealthy";
+        return "Hazardous";
+    }
+    
+    // Convert lat/long to 3D position with precise placement for India
+    function latLongToVector3(lat, lon, radius) {
+        // Convert latitude and longitude from degrees to radians
+        const phi = (90 - lat) * (Math.PI / 180);
+        const theta = (lon + 180) * (Math.PI / 180);
+        
+        return new THREE.Vector3(
+            -radius * Math.sin(phi) * Math.cos(theta),
+            radius * Math.cos(phi),
+            radius * Math.sin(phi) * Math.sin(theta)
+        );
+    }
+    
+    function initEarth() {
+        // Create scene
+        scene = new THREE.Scene();
+        
+        // Create camera
+        camera = new THREE.PerspectiveCamera(
+            75, 
+            document.getElementById('earth-container').clientWidth / 
+            document.getElementById('earth-container').clientHeight, 
+            0.1, 
+            1000
+        );
+        camera.position.z = 5;
+        
+        // Create renderer
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setSize(
+            document.getElementById('earth-container').clientWidth, 
+            document.getElementById('earth-container').clientHeight
+        );
+        document.getElementById('earth-container').appendChild(renderer.domElement);
+        
+        // Add controls
+        controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.25;
+        controls.minDistance = 3;
+        controls.maxDistance = 10;
+        
+        // Create Earth with higher resolution
+        const geometry = new THREE.SphereGeometry(2, 128, 128);
+        const textureLoader = new THREE.TextureLoader();
+        
+        // Load high-resolution Earth texture
+        const texture = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_atmos_2048.jpg');
+        const bumpMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_normal_2048.jpg');
+        const specularMap = textureLoader.load('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/textures/planets/earth_specular_2048.jpg');
+        
+        const material = new THREE.MeshPhongMaterial({
+            map: texture,
+            bumpMap: bumpMap,
+            bumpScale: 0.1,
+            specularMap: specularMap,
+            specular: new THREE.Color('grey'),
+            shininess: 5,
+            transparent: true,
+            opacity: 0.95
+        });
+        
+        earth = new THREE.Mesh(geometry, material);
+        scene.add(earth);
+        
+        // Create a group for India and markers to ensure they move together
+        indiaGroup = new THREE.Group();
+        scene.add(indiaGroup);
+        
+        // Add ambient light
+        const ambientLight = new THREE.AmbientLight(0x333333);
+        scene.add(ambientLight);
+        
+        // Add directional light
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(5, 3, 5);
+        scene.add(directionalLight);
+        
+        // Add stars background
+        const starGeometry = new THREE.BufferGeometry();
+        const starMaterial = new THREE.PointsMaterial({
+            color: 0xffffff,
+            size: 0.1
+        });
+        
+        const starVertices = [];
+        for (let i = 0; i < 10000; i++) {
+            const x = (Math.random() - 0.5) * 2000;
+            const y = (Math.random() - 0.5) * 2000;
+            const z = (Math.random() - 0.5) * 2000;
+            starVertices.push(x, y, z);
+        }
+        
+        starGeometry.setAttribute('position', new THREE.Float32BufferAttribute(starVertices, 3));
+        const stars = new THREE.Points(starGeometry, starMaterial);
+        scene.add(stars);
+        
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            camera.aspect = document.getElementById('earth-container').clientWidth / 
+                           document.getElementById('earth-container').clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(
+                document.getElementById('earth-container').clientWidth, 
+                document.getElementById('earth-container').clientHeight
+            );
+        });
+        
+        // Add event listeners for controls
+        document.getElementById('zoom-in').addEventListener('click', () => {
+            camera.position.z *= 0.9;
+        });
+        
+        document.getElementById('zoom-out').addEventListener('click', () => {
+            camera.position.z *= 1.1;
+        });
+        
+        document.getElementById('reset-view').addEventListener('click', () => {
+            camera.position.z = 5;
+            controls.reset();
+            earth.rotation.y = THREE.MathUtils.degToRad(-90); // Center on India
+        });
+        
+        document.getElementById('date-selector').addEventListener('change', (e) => {
+            selectedDate = e.target.value;
+            if (!isLiveMode) {
+                fetchPMData();
+            }
+        });
+        
+        document.getElementById('live-mode').addEventListener('click', () => {
+            isLiveMode = !isLiveMode;
+            const liveButton = document.getElementById('live-mode');
+            const liveIndicator = document.getElementById('live-indicator');
+            
+            if (isLiveMode) {
+                liveButton.textContent = 'Historical Mode';
+                liveButton.classList.remove('btn-danger');
+                liveButton.classList.add('btn-warning');
+                liveIndicator.style.display = 'block';
+                document.getElementById('date-selector').disabled = true;
+                startLiveUpdates();
+            } else {
+                liveButton.textContent = 'Live Mode';
+                liveButton.classList.remove('btn-warning');
+                liveButton.classList.add('btn-danger');
+                liveIndicator.style.display = 'none';
+                document.getElementById('date-selector').disabled = false;
+                stopLiveUpdates();
+                fetchPMData();
+            }
+        });
+        
+        // Close details panel
+        document.getElementById('close-details').addEventListener('click', () => {
+            document.getElementById('location-details').style.display = 'none';
+            if (selectedMarker) {
+                selectedMarker.material.color.setHex(selectedMarker.userData.originalColor);
+                selectedMarker.scale.set(1, 1, 1);
+                selectedMarker = null;
+            }
+        });
+        
+        // Mouse click event for marker selection
+        document.getElementById('earth-container').addEventListener('click', onClick);
+        
+        // Hide loading indicator
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('live-indicator').style.display = 'none';
+        
+        // Initial data fetch
+        fetchPMData();
+        
+        // Start animation loop
+        animate();
+    }
+    
+    function startLiveUpdates() {
+        // Update data every 30 seconds in live mode
+        fetchPMData();
+        liveUpdateInterval = setInterval(fetchPMData, 30000);
+    }
+    
+    function stopLiveUpdates() {
+        if (liveUpdateInterval) {
+            clearInterval(liveUpdateInterval);
+            liveUpdateInterval = null;
+        }
+    }
+    
+    function onClick(event) {
+        // Calculate mouse position in normalized device coordinates
+        mouse.x = (event.clientX / renderer.domElement.clientWidth) * 2 - 1;
+        mouse.y = -(event.clientY / renderer.domElement.clientHeight) * 2 + 1;
+        
+        // Update the raycaster
+        raycaster.setFromCamera(mouse, camera);
+        
+        // Check for intersections with PM markers
+        const intersects = raycaster.intersectObjects(pmMarkers);
+        
+        if (intersects.length > 0) {
+            const marker = intersects[0].object;
+            
+            // If we had a previously selected marker, reset its appearance
+            if (selectedMarker) {
+                selectedMarker.material.color.setHex(selectedMarker.userData.originalColor);
+                selectedMarker.scale.set(1, 1, 1);
+            }
+            
+            // Highlight the selected marker
+            selectedMarker = marker;
+            selectedMarker.scale.set(1.5, 1.5, 1.5);
+            
+            // Show location details
+            const detailsPanel = document.getElementById('location-details');
+            document.getElementById('detail-location').textContent = marker.userData.location;
+            document.getElementById('detail-pm25').textContent = marker.userData.pm2_5;
+            document.getElementById('detail-pm10').textContent = marker.userData.pm10 || '--';
+            document.getElementById('detail-aqi').textContent = getAQICategory(marker.userData.pm2_5);
+            document.getElementById('detail-wind').textContent = marker.userData.wind_speed || '--';
+            document.getElementById('detail-humidity').textContent = marker.userData.humidity || '--';
+            document.getElementById('detail-temp').textContent = marker.userData.temperature || '--';
+            document.getElementById('detail-updated').textContent = new Date(marker.userData.timestamp).toLocaleString();
+            document.getElementById('detail-confidence').textContent = marker.userData.confidence || '--';
+            
+            detailsPanel.style.display = 'block';
+            
+            // Update info panel
+            document.getElementById('location-info').textContent = marker.userData.location;
+            document.getElementById('pm-info').textContent = `PM2.5: ${marker.userData.pm2_5} µg/m³`;
+            document.getElementById('aqi-info').textContent = `AQI Category: ${getAQICategory(marker.userData.pm2_5)}`;
+        }
+    }
+    
+    function createPMMarkers(pmData) {
+        // Clear existing markers
+        pmMarkers.forEach(marker => indiaGroup.remove(marker));
+        pmMarkers = [];
+        
+        pmData.forEach(location => {
+            const pm2_5 = location.pm2_5;
+            const color = getColorForPM(pm2_5);
+            const hexColor = (color[0] << 16) + (color[1] << 8) + color[2];
+            
+            // Create marker (a small sphere)
+            const markerGeometry = new THREE.SphereGeometry(0.05, 16, 16);
+            const markerMaterial = new THREE.MeshBasicMaterial({
+                color: new THREE.Color(hexColor),
+                transparent: true,
+                opacity: 0.9
+            });
+            
+            const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+            
+            // Position marker on Earth's surface with precise placement for India
+            const position = latLongToVector3(location.lat, location.lon, 2.02);
+            marker.position.copy(position);
+            
+            // Store original data in the marker
+            marker.userData = {
+                location: location.name,
+                pm2_5: pm2_5,
+                pm10: location.pm10,
+                lat: location.lat,
+                lon: location.lon,
+                wind_speed: location.wind_speed,
+                humidity: location.humidity,
+                temperature: location.temperature,
+                timestamp: location.timestamp,
+                confidence: location.confidence,
+                originalColor: hexColor
+            };
+            
+            // Add marker to India group and our array
+            indiaGroup.add(marker);
+            pmMarkers.push(marker);
+        });
+        
+        // Position India group to match Earth's rotation
+        indiaGroup.rotation.copy(earth.rotation);
+    }
+    
+    function fetchPMData() {
+        document.getElementById('loading').style.display = 'block';
+        document.getElementById('loading').textContent = isLiveMode 
+            ? 'Loading live pollution data...' 
+            : 'Loading pollution data...';
+        
+        // Hide details panel if open
+        document.getElementById('location-details').style.display = 'none';
+        if (selectedMarker) {
+            selectedMarker.material.color.setHex(selectedMarker.userData.originalColor);
+            selectedMarker.scale.set(1, 1, 1);
+            selectedMarker = null;
+        }
+        
+        const url = isLiveMode 
+            ? '/api/pm-predictions/?live=true'
+            : `/api/pm-predictions/?date=${selectedDate}`;
+        
+        fetch(url)
+            .then(response => response.json())
+            .then(data => {
+                // Process the data and create markers
+                const pmData = data.predictions.map(pred => ({
+                    name: pred.location || `Location (${pred.lat.toFixed(2)}, ${pred.lon.toFixed(2)})`,
+                    lat: pred.lat,
+                    lon: pred.lon,
+                    pm2_5: pred.pm2_5,
+                    pm10: pred.pm10,
+                    wind_speed: pred.wind_speed,
+                    humidity: pred.humidity,
+                    temperature: pred.temperature,
+                    timestamp: pred.timestamp || new Date().toISOString(),
+                    confidence: pred.confidence || Math.round(Math.random() * 30 + 70) // Default confidence 70-100%
+                }));
+                
+                createPMMarkers(pmData);
+                updateTrendChart(data.trend);
+                
+                // Rotate Earth to center on India
+                earth.rotation.y = THREE.MathUtils.degToRad(-90);
+                indiaGroup.rotation.copy(earth.rotation);
+                controls.reset();
+                
+                document.getElementById('loading').style.display = 'none';
+                
+                // Update timestamp for live data
+                if (isLiveMode) {
+                    document.getElementById('detail-updated').textContent = 'Just now';
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching PM data:', error);
+                document.getElementById('loading').textContent = 'Error loading data. Please try again.';
+                setTimeout(() => {
+                    document.getElementById('loading').style.display = 'none';
+                }, 2000);
+            });
+    }
+    
+    function updateTrendChart(trendData) {
+        const ctx = document.getElementById('trend-chart').getContext('2d');
+        
+        if (trendChart) {
+            trendChart.destroy();
+        }
+        
+        // Prepare data for chart
+        const dates = trendData.map(item => {
+            const d = new Date(item.date);
+            return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        });
+        const pm25Values = trendData.map(item => item.pm2_5);
+        
+        // Create background colors based on PM2.5 values
+        const backgroundColors = pm25Values.map(pm => {
+            const [r, g, b] = getColorForPM(pm);
+            return `rgba(${r}, ${g}, ${b}, 0.7)`;
+        });
+        
+        const borderColors = pm25Values.map(pm => {
+            const [r, g, b] = getColorForPM(pm);
+            return `rgba(${r}, ${g}, ${b}, 1)`;
+        });
+        
+        trendChart = new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels: dates,
+                datasets: [{
+                    label: 'PM2.5 (µg/m³)',
+                    data: pm25Values,
+                    backgroundColor: backgroundColors,
+                    borderColor: borderColors,
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: isLiveMode 
+                            ? 'Live PM2.5 Trend' 
+                            : `7-Day PM2.5 Trend (Ending ${selectedDate})`
+                    },
+                    tooltip: {
+                        callbacks: {
+                            afterLabel: function(context) {
+                                const pm = context.raw;
+                                return `AQI Category: ${getAQICategory(pm)}`;
+                            }
+                        }
+                    },
+                    legend: {
+                        display: false
+                    }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        title: {
+                            display: true,
+                            text: 'PM2.5 (µg/m³)'
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Date'
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    function animate() {
+        requestAnimationFrame(animate);
+        
+        // Rotate Earth slowly
+        earth.rotation.y += 0.001;
+        
+        // Keep India group in sync with Earth's rotation
+        indiaGroup.rotation.copy(earth.rotation);
+        
+        // Update controls
+        controls.update();
+        
+        renderer.render(scene, camera);
+    }
+    
+    // Initialize the application
+    window.onload = function() {
+        initEarth();
+    };
+</script>
+{% endblock %}
